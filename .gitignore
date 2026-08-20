@@ -1,4 +1,7 @@
 .venv/
+.env
+.env.*
+!.env.example
 .DS_Store
 *.egg-info/
 __pycache__/
@@ -8,10 +11,13 @@ data/raw/
 data/processed/
 data/manifests/
 data/features/
+data/indices/
 outputs/
 artifacts/
+.kaggle-run.log
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/manifests/.gitkeep
 !data/features/.gitkeep
+!data/indices/.gitkeep
 !outputs/.gitkeep

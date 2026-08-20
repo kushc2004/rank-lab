@@ -1,0 +1,5 @@
+# Optional official KuaiRand-1K extension. No path is assumed by RankLab.
+dataset: kuairand_1k
+enabled: false
+raw_dir: null
+dataset_claim: official_extension_must_be_attached_and_audited_separately

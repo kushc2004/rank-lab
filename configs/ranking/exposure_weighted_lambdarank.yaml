@@ -1,0 +1,4 @@
+ranking_profile: exposure_weighted_lambdarank
+ranker_enabled: true
+ranking_objective: lambdarank
+debias_profile: clipped_density_ratio

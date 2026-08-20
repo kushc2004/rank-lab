@@ -1,0 +1,8 @@
+experiment: obd_ope
+optional_ope: true
+ope_sample_fractions: [0.10, 0.25, 0.50, 1.00]
+ope_seeds: [42, 43, 44]
+ope_bootstrap_samples: 200
+ope_clip_values: [10.0, 50.0]
+target_policy: uniform_random
+ground_truth_policy_log: random

@@ -1,0 +1,5 @@
+dataset: open_bandit
+optional_ope: true
+obd_data_path: null
+obd_campaign: all
+obd_behavior_policy: bts

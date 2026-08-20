@@ -16,7 +16,7 @@ from ranklab.utils.config import kuairand_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 STAGES = {
     "audit": (
         "scripts/audit_kuairand.py",
@@ -25,7 +25,10 @@ STAGES = {
             "data/manifests/validation.parquet",
             "data/manifests/standard_test.parquet",
             "data/manifests/randomized_test.parquet",
+            "data/manifests/split_manifest.parquet",
             "outputs/reports/kuairand_data_audit.json",
+            "outputs/reports/kuairand_data_audit.md",
+            "outputs/reports/feature_leakage_audit.csv",
         ),
     ),
     "features": (
@@ -38,7 +41,9 @@ STAGES = {
             "outputs/models/popularity.pkl",
             "outputs/metrics/popularity.json",
             "outputs/predictions/popularity_standard.parquet",
+            "outputs/predictions/popularity_standard_per_group.parquet",
             "outputs/predictions/popularity_randomized.parquet",
+            "outputs/predictions/popularity_randomized_per_group.parquet",
         ),
     ),
     "bpr": (
@@ -47,7 +52,9 @@ STAGES = {
             "outputs/models/bpr.pkl",
             "outputs/metrics/bpr.json",
             "outputs/predictions/bpr_standard.parquet",
+            "outputs/predictions/bpr_standard_per_group.parquet",
             "outputs/predictions/bpr_randomized.parquet",
+            "outputs/predictions/bpr_randomized_per_group.parquet",
         ),
     ),
     "exposure_gap": (

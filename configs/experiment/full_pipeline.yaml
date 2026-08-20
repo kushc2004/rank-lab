@@ -1,0 +1,17 @@
+seed: 42
+bootstrap_samples: 500
+popularity_weight_offset: 1.0
+optional_ope: false
+optional_scale: true
+scale_multiplier: 10
+scale_query_count: 1000
+scale_hnsw_m: 32
+scale_hnsw_ef_construction: 80
+scale_hnsw_ef_search_values: [16, 32, 64, 128]
+ope_sample_fractions: [0.10, 0.25, 0.50, 1.00]
+ope_seeds: [42, 43, 44]
+ope_bootstrap_samples: 200
+ope_clip_values: [10.0, 50.0]
+obd_campaign: all
+obd_behavior_policy: bts
+obd_data_path: null

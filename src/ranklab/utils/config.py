@@ -10,7 +10,13 @@ def load_yaml(relative: str) -> dict:
         return yaml.safe_load(handle)
 
 def parse_overrides(argv: list[str]) -> dict:
-    return dict(token.split("=", 1) for token in argv if "=" in token)
+    overrides: dict[str, object] = {}
+    for token in argv:
+        if "=" not in token:
+            continue
+        key, raw = token.split("=", 1)
+        overrides[key] = yaml.safe_load(raw)
+    return overrides
 
 def kuairand_config(argv: list[str]) -> dict:
     config = load_yaml("configs/data/kuairand_pure.yaml")

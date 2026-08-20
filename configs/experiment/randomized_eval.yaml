@@ -1,0 +1,3 @@
+experiment: randomized_eval
+evaluation_domain: randomized_test_holdout
+randomized_adaptation_rows_excluded: true

@@ -1,93 +1,134 @@
-# RankLab (Milestones 0–3)
+# RankLab
 
-This implementation is limited to KuaiRand-Pure ingestion, temporal safety,
-historical features, popularity/BPR baselines, and standard-versus-randomized
-evaluation. It deliberately contains no neural retrieval, FAISS, LambdaRank,
-density-ratio weighting, OPE, or UI code.
+RankLab is an end-to-end, exposure-aware recommender-system experiment on
+KuaiRand-Pure. It implements the full project specification: reproducible data
+auditing and temporal splits, leakage-safe historical features, popularity and
+BPR-MF baselines, Two-Tower retrieval, exact FAISS candidate generation,
+LightGBM LambdaRank, randomized-domain density-ratio weighting, randomized-log
+evaluation, cohort/bootstrap analysis, calibration reranking, optional
+propensity-bearing OPE, controlled scaling, and a read-only Streamlit report.
 
-## Official data acquisition
+Randomized KuaiRand rows never enter recommender or ranker label training. The
+primary configuration also excludes every undated user/item snapshot feature;
+KuaiRand-Pure does not publish a historical availability timestamp for those
+fields. `use_side_features=true` exists only as an explicitly relaxed leakage
+sensitivity run. KuaiRand propensities are never fabricated.
 
-The official KuaiRand repository documents the archive and checksum. Download
-and verify it without changing its internal names:
+## Official KuaiRand-Pure data
+
+Download the official Zenodo archive, verify it, and preserve its internal
+names:
 
 ```bash
 bash scripts/download_kuairand_pure.sh
 ```
 
-This obtains `KuaiRand-Pure.tar.gz` from the official Zenodo record, verifies
-MD5 `0820331067a3784d9691136f772b35a7`, and extracts its official
-`KuaiRand-Pure/data/` hierarchy under `data/raw/`. The script will not replace
-an existing archive or extracted directory. See the official
-[KuaiRand repository](https://github.com/chongminggao/KuaiRand) and
-[Zenodo record](https://zenodo.org/records/10439422).
+The workflow verifies MD5 `0820331067a3784d9691136f772b35a7` and expects the
+official `KuaiRand-Pure/data/` hierarchy containing exactly these source files:
 
-To create the private Kaggle input from that exact verified archive:
+```text
+log_random_4_22_to_5_08_pure.csv
+log_standard_4_08_to_4_21_pure.csv
+log_standard_4_22_to_5_08_pure.csv
+user_features_pure.csv
+video_features_basic_pure.csv
+video_features_statistic_pure.csv
+```
+
+The source is the official [KuaiRand repository](https://github.com/chongminggao/KuaiRand)
+and [Zenodo record](https://zenodo.org/records/10439422). To publish the already
+verified archive as a private Kaggle input, run:
 
 ```bash
 python scripts/publish_kuairand_source.py --create
 ```
 
-## Reproduce the baseline experiment
+## Full local or Kaggle-GPU run
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev]'
-./scripts/download_kuairand_pure.sh
-python scripts/audit_kuairand.py
-python scripts/build_features.py data=kuairand_pure
-python scripts/train_popularity.py data=kuairand_pure
-python scripts/train_bpr.py data=kuairand_pure
-python scripts/evaluate_exposure_gap.py data=kuairand_pure
-pytest
+python -m pip install -e '.[full]'
+python scripts/run_full_pipeline.py device=auto
 ```
 
-## Reuse completed artifacts
-
-The cache contains only derived artifacts (split manifests, leakage-safe
-features, fitted models, predictions, metrics, and reports), never raw data.
-Run the cached sequential pipeline after installing the package:
+`device=auto` chooses CUDA, then Apple MPS, then CPU. Neural retrieval and BPR
+benefit from a GPU; LightGBM, auditing, feature construction, metrics, and
+reports remain CPU workloads. Configuration overrides use `key=value`, for
+example:
 
 ```bash
-python scripts/run_cached_baselines.py
+python scripts/run_full_pipeline.py raw_dir=/path/to/KuaiRand-Pure/data epochs=12 candidate_k=300
 ```
 
-It verifies the official CSV file names/sizes and hashes the relevant
-implementation/configuration before accepting a cache hit. To create a compact
-archive suitable for a Kaggle Dataset or notebook output:
+The deterministic stage order is:
+
+```text
+baselines -> two_tower -> candidates -> rankers -> evaluation -> analysis
+          -> ope -> scale -> serving -> report
+```
+
+Every completed stage is atomically recorded in
+`outputs/full_pipeline_state.json`. Re-running the same command skips compatible
+completed stages. Restored artifacts are accepted only when raw-file sizes,
+configuration, and implementation fingerprint match. To restart a portion:
+
+```bash
+python scripts/run_full_pipeline.py --from-stage rankers
+python scripts/run_full_pipeline.py --from-stage evaluation --to-stage report
+python scripts/run_full_pipeline.py --force
+```
+
+The final report is `outputs/reports/full_experiment_report.md`; metrics and
+per-context predictions remain in `outputs/metrics/` and
+`outputs/predictions/`.
+
+## Kaggle notebook and reusable outputs
+
+`notebooks/kaggle_full_pipeline.ipynb` clones this public repository, validates
+the attached official dataset, restores any attached derived-artifact cache,
+runs only missing stages, and writes a fresh cache archive to notebook outputs.
+The launch files are `notebooks/kernel-metadata.json` and
+`notebooks/kaggle.yml`.
+
+```bash
+kaggle kernels push -p .
+python3 scripts/watch_kaggle_kernel.py --slug kushchaudhari/ranklab-kuairand-pure-full-pipeline
+```
+
+The watcher appends live output to ignored `.kaggle-run.log` without reading or
+printing credentials. Use `--once` for a single snapshot.
+
+To package or restore derived artifacts yourself:
 
 ```bash
 python scripts/publish_kaggle_artifacts.py --no-upload
-```
-
-The archive is written to `artifacts/kaggle/ranklab_artifacts.tar.gz` (ignored
-by Git). It can be restored in another checkout with:
-
-```bash
 python scripts/restore_kaggle_artifacts.py artifacts/kaggle/ranklab_artifacts.tar.gz
 ```
 
-The Kaggle notebook automatically restores an attached archive and then calls
-the cached runner. It always packages fresh derived outputs at the end. Set
-`PUBLISH_CACHE=True` in its last cell only when Kaggle API credentials are
-available; the default is private when initially creating the dataset locally.
+Raw data is never included in that archive. It contains manifests, historical
+features, ranker data, indices, models, predictions, metrics, reports, and the
+stage-state fingerprint.
 
-`train_bpr.py` defaults to `device: mps` in
-`configs/retrieval/bpr_mf.yaml`, so on an Apple-silicon Mac its factor
-training runs on the Metal GPU. It fails clearly if MPS is unavailable; set
-`device: cpu` only when an explicit CPU run is desired.
+## Optional Open Bandit Dataset OPE
 
-For Kaggle, enable a GPU accelerator and run
-`notebooks/kaggle_baselines.ipynb`; it overrides BPR to `device=cuda`.
-`notebooks/kernel-metadata.json` is ready for `kaggle kernels push -p notebooks`.
-It declares two private inputs: the checksum-verified official archive
-`kushchaudhari/kuairand-pure-official` and the derived cache
-`kushchaudhari/ranklab-baseline-artifacts`. Their exact contract is documented
-in `notebooks/kaggle.yml`.
+KuaiRand-Pure has no documented row-level logging propensities, so the default
+OPE stage writes a truthful skipped-status artifact. Install the separate OPE
+extra and configure a real Open Bandit Dataset path to enable DM, IPS, SNIPS,
+and doubly robust estimates with clipping and effective-sample-size diagnostics:
 
-The split is deterministic: standard logs through 2022-04-21 train; standard
-2022-04-22 through 2022-04-30 validation; standard 2022-05-01 through
-2022-05-08 test; all random-intervention rows are randomized test only.
+```bash
+python -m pip install -e '.[full,ope]'
+python scripts/run_full_pipeline.py optional_ope=true obd_data_path=/path/to/open_bandit_dataset
+```
 
-Metrics are only written after commands run on verified local raw data. They
-are not inferred from the dataset's published aggregate statistics.
+## Dashboard
+
+After a completed experiment:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+The dashboard is read-only and displays generated artifacts; it never launches
+training from the browser.

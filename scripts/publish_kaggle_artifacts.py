@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = "kushchaudhari/ranklab-baseline-artifacts"
-INCLUDE = ("data/manifests", "data/features", "outputs")
+INCLUDE = ("data/manifests", "data/features", "data/processed", "data/indices", "outputs")
 
 
 def _archive(staging: Path) -> Path:
@@ -32,7 +32,7 @@ def main() -> None:
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
     parser.add_argument("--create", action="store_true", help="Create the dataset; otherwise publish a new version.")
     parser.add_argument("--public", action="store_true", help="Only applies with --create. Default is private.")
-    parser.add_argument("--message", default="Refresh RankLab derived baseline artifacts")
+    parser.add_argument("--message", default="Refresh RankLab derived experiment artifacts")
     parser.add_argument("--no-upload", action="store_true", help="Package only, for a Kaggle notebook output.")
     arguments = parser.parse_args()
 
@@ -42,7 +42,7 @@ def main() -> None:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     archive_path = _archive(staging)
-    title = "RankLab Baseline Artifacts"
+    title = "RankLab Experiment Artifacts"
     (staging / "dataset-metadata.json").write_text(json.dumps({
         "title": title,
         "id": arguments.dataset,

@@ -1,0 +1,8 @@
+experiment: faiss_scaling
+optional_scale: true
+scale_multiplier: 10
+scale_query_count: 1000
+scale_hnsw_m: 32
+scale_hnsw_ef_construction: 80
+scale_hnsw_ef_search_values: [16, 32, 64, 128]
+scaling_dataset_label: controlled_replicated_corpus_not_kuairand_1k

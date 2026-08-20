@@ -1,0 +1,19 @@
+{
+  "id": "kushchaudhari/ranklab-kuairand-pure-full-pipeline",
+  "title": "RankLab KuaiRand-Pure Full Pipeline",
+  "code_file": "notebooks/kaggle_full_pipeline.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "kushchaudhari/kuairand-pure-official",
+    "kushchaudhari/ranklab-baseline-artifacts"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

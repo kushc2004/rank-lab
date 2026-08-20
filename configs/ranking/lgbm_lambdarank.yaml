@@ -1,0 +1,4 @@
+n_estimators: 500
+early_stopping_rounds: 30
+weight_clip: 10.0
+self_normalize_weights: true

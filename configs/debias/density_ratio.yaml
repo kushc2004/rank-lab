@@ -1,0 +1,6 @@
+max_rows_per_domain: 300000
+clip_values: [2.0, 5.0, 10.0, 20.0]
+selected_clip: 10.0
+self_normalize: true
+randomized_validation_end: 20220430
+randomized_evaluation_start: 20220501

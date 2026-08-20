@@ -36,14 +36,17 @@ def _torch_device(requested: str):
         return torch, torch.device("mps")
     if requested == "cpu":
         return torch, torch.device("cpu")
+    cuda_usable = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 7
     if requested == "cuda":
-        if not torch.cuda.is_available():
+        if not cuda_usable:
             raise RuntimeError(
-                "CUDA was requested but is unavailable. Enable a Kaggle GPU accelerator, "
-                "or explicitly set device: cpu."
+                "CUDA was requested but is unavailable or unsupported by this PyTorch build. "
+                "Use a compatible Kaggle GPU, or explicitly set device: cpu."
             )
         return torch, torch.device("cuda")
     if requested == "auto":
+        if cuda_usable:
+            return torch, torch.device("cuda")
         return torch, torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     raise ValueError("device must be one of: mps, cuda, cpu, auto")
 

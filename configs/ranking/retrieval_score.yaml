@@ -1,0 +1,3 @@
+ranking_profile: retrieval_score
+ranker_enabled: false
+score_column: retrieval_score

@@ -6,7 +6,10 @@ import pandas as pd
 def evaluate_ranked_impressions(frame: pd.DataFrame, k_values: tuple[int, ...] = (5, 10, 20), min_group_size: int = 2) -> tuple[dict, pd.DataFrame]:
     # A group is an explicit evaluation context, not a claimed slate/request ID.
     work = frame.copy()
-    work["evaluation_group"] = work.user_id.astype(str) + ":" + work.date.astype(str)
+    if "context_id" in work:
+        work["evaluation_group"] = work["context_id"].astype(str)
+    else:
+        work["evaluation_group"] = work.user_id.astype(str) + ":" + work.date.astype(str)
     work["_group_size"] = work.groupby("evaluation_group")["item_id"].transform("size")
     work["_total_positive"] = work.groupby("evaluation_group")["long_view"].transform("sum")
     eligible = work.loc[work["_group_size"].ge(min_group_size) & work["_total_positive"].gt(0)].copy()

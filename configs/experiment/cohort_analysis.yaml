@@ -1,0 +1,3 @@
+experiment: cohort_analysis
+bootstrap_samples: 500
+cohort_dimensions: [user_activity, item_popularity]
