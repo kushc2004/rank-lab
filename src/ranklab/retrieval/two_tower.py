@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 import numpy as np
@@ -312,8 +313,14 @@ def fit_two_tower(
         list(user_tower.parameters()) + list(item_tower.parameters()), lr=learning_rate
     )
 
-    def train_epochs(epoch_count: int, negatives: np.ndarray) -> None:
-        for _ in range(epoch_count):
+    def train_epochs(epoch_count: int, negatives: np.ndarray, phase: str) -> None:
+        print(
+            f"[two-tower] {phase}: {epoch_count} epoch(s), {len(pairs):,} pairs, "
+            f"batch_size={batch_size}, device={torch_device}",
+            flush=True,
+        )
+        for epoch in range(epoch_count):
+            started = perf_counter()
             epoch_order = rng.permutation(len(pairs))
             for start in range(0, len(pairs), batch_size):
                 indices = epoch_order[start : start + batch_size]
@@ -347,7 +354,12 @@ def fit_two_tower(
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-    train_epochs(epochs, explicit_negatives)
+            print(
+                f"[two-tower] {phase}: epoch {epoch + 1}/{epoch_count} "
+                f"completed in {perf_counter() - started:.1f}s",
+                flush=True,
+            )
+    train_epochs(epochs, explicit_negatives, "initial training")
 
     hard_negative_count = 0
     if hard_negative_refresh and hard_negative_epochs > 0:
@@ -402,7 +414,7 @@ def fit_two_tower(
                     if selected is not None:
                         hard_negatives[pair_index] = selected
                         hard_negative_count += 1
-        train_epochs(hard_negative_epochs, hard_negatives)
+        train_epochs(hard_negative_epochs, hard_negatives, "hard-negative refresh")
     with torch.no_grad():
         all_history_tensor = torch.as_tensor(
             evaluation_histories, device=torch_device

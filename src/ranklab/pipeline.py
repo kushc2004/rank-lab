@@ -289,6 +289,7 @@ class FullPipeline:
         # Ranker-training candidates must come from a retriever that has not
         # learned the held-out ranker labels. The final retriever is trained on
         # all standard training rows and is used only after that boundary.
+        print("[two-tower] fitting ranker-source retriever", flush=True)
         source_model = self._fit_retriever(source_train, sides)
         source_dir = self.root / "outputs/models/two_tower_ranker_source"
         source_model.save(source_dir)
@@ -297,6 +298,7 @@ class FullPipeline:
         )
         source_index_dir = self.root / "data/indices/two_tower_ranker_source_exact"
         source_index.save(source_index_dir)
+        print("[two-tower] fitting final retriever", flush=True)
         model = self._fit_retriever(train, sides)
         model_dir = self.root / "outputs/models/two_tower"
         model.save(model_dir)
@@ -340,8 +342,10 @@ class FullPipeline:
                         strategy == self.config["negative_strategy"]
                         and bool(hard_refresh) == bool(self.config["hard_negative_refresh"])
                     ):
+                        print(f"[two-tower] ablation {name}: reusing final retriever", flush=True)
                         ablation_model = model
                     else:
+                        print(f"[two-tower] fitting ablation {name}", flush=True)
                         ablation_model = self._fit_retriever(
                             train, sides, negative_strategy=str(strategy),
                             hard_negative_refresh=bool(hard_refresh),

@@ -36,7 +36,15 @@ def _torch_device(requested: str):
         return torch, torch.device("mps")
     if requested == "cpu":
         return torch, torch.device("cpu")
-    cuda_usable = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 7
+    cuda_usable = False
+    if torch.cuda.is_available():
+        capability = torch.cuda.get_device_capability(0)
+        architecture = f"sm_{capability[0]}{capability[1]}"
+        # Do not use a generation heuristic here: Pascal's P100 is sm_60 and
+        # works with a wheel that actually ships sm_60 kernels.  The installed
+        # wheel is the authority, which also protects against Kaggle images
+        # whose recent CUDA wheels have dropped Pascal support.
+        cuda_usable = architecture in set(torch.cuda.get_arch_list())
     if requested == "cuda":
         if not cuda_usable:
             raise RuntimeError(
