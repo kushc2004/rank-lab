@@ -1,5 +1,5 @@
 {
-  "id": "kushchaudhari/ranklab-kuairand-baselines",
+  "id": "kushchaudhari/ranklab-kuairand-pure-baselines",
   "title": "RankLab KuaiRand-Pure Baselines",
   "code_file": "kaggle_baselines.ipynb",
   "language": "python",
