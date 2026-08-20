@@ -16,7 +16,14 @@ fi
 if [[ ! -e "$archive_path" ]]; then
   curl --fail --location --retry 3 --output "$archive_path" "$url"
 fi
-actual_md5="$(md5 -q "$archive_path")"
+if command -v md5sum >/dev/null 2>&1; then
+  actual_md5="$(md5sum "$archive_path" | awk '{print $1}')"
+elif command -v md5 >/dev/null 2>&1; then
+  actual_md5="$(md5 -q "$archive_path")"
+else
+  echo "Neither md5sum nor md5 is available to verify $archive_path" >&2
+  exit 1
+fi
 if [[ "$actual_md5" != "$expected_md5" ]]; then
   echo "MD5 mismatch for $archive_path: expected $expected_md5, got $actual_md5" >&2
   exit 1

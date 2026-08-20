@@ -86,8 +86,9 @@ per-context predictions remain in `outputs/metrics/` and
 ## Kaggle notebook and reusable outputs
 
 `notebooks/kaggle_full_pipeline.ipynb` clones this public repository, validates
-the attached official dataset, restores any attached derived-artifact cache,
-runs only missing stages, and writes a fresh cache archive to notebook outputs.
+the attached official dataset, or downloads and checksum-verifies it from the
+official source if that input is absent. It restores any attached derived-artifact
+cache, runs only missing stages, and writes a fresh cache archive to notebook outputs.
 The launch files are `notebooks/kernel-metadata.json` and
 `notebooks/kaggle.yml`.
 
