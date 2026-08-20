@@ -1,0 +1,17 @@
+# Project-side Kaggle launch contract. Kaggle CLI itself reads
+# kernel-metadata.json; this file documents the two required immutable inputs.
+kernel:
+  metadata: notebooks/kernel-metadata.json
+  notebook: notebooks/kaggle_baselines.ipynb
+  accelerator: gpu
+inputs:
+  raw_data:
+    dataset: kushchaudhari/kuairand-pure-official
+    archive: KuaiRand-Pure.tar.gz
+    source: https://zenodo.org/records/10439422
+    md5: 0820331067a3784d9691136f772b35a7
+  artifact_cache:
+    dataset: kushchaudhari/ranklab-baseline-artifacts
+    archive: ranklab_artifacts.tar.gz
+outputs:
+  archive: artifacts/kaggle/ranklab_artifacts.tar.gz

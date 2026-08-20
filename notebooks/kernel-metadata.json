@@ -1,0 +1,19 @@
+{
+  "id": "kushchaudhari/ranklab-kuairand-baselines",
+  "title": "RankLab KuaiRand-Pure Baselines",
+  "code_file": "kaggle_baselines.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "",
+  "dataset_sources": [
+    "kushchaudhari/kuairand-pure-official",
+    "kushchaudhari/ranklab-baseline-artifacts"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

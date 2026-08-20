@@ -21,6 +21,12 @@ an existing archive or extracted directory. See the official
 [KuaiRand repository](https://github.com/chongminggao/KuaiRand) and
 [Zenodo record](https://zenodo.org/records/10439422).
 
+To create the private Kaggle input from that exact verified archive:
+
+```bash
+python scripts/publish_kuairand_source.py --create
+```
+
 ## Reproduce the baseline experiment
 
 ```bash
@@ -73,6 +79,11 @@ training runs on the Metal GPU. It fails clearly if MPS is unavailable; set
 
 For Kaggle, enable a GPU accelerator and run
 `notebooks/kaggle_baselines.ipynb`; it overrides BPR to `device=cuda`.
+`notebooks/kernel-metadata.json` is ready for `kaggle kernels push -p notebooks`.
+It declares two private inputs: the checksum-verified official archive
+`kushchaudhari/kuairand-pure-official` and the derived cache
+`kushchaudhari/ranklab-baseline-artifacts`. Their exact contract is documented
+in `notebooks/kaggle.yml`.
 
 The split is deterministic: standard logs through 2022-04-21 train; standard
 2022-04-22 through 2022-04-30 validation; standard 2022-05-01 through
