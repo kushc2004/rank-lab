@@ -955,6 +955,9 @@ class FullPipeline:
             frontier = rerank_frontier(
                 natural, profiles, tuple(float(value) for value in self.config["relevance_weights"]),
                 int(self.config["final_k"]),
+                progress=lambda message, split=split_label: print(
+                    f"[analysis] {split}: {message}", flush=True
+                ),
             )
             frontier_path = self._write_frame(
                 frontier, f"outputs/predictions/calibration_frontier_{split_label}.parquet"
