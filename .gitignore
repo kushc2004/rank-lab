@@ -9,6 +9,7 @@ data/processed/
 data/manifests/
 data/features/
 outputs/
+artifacts/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/manifests/.gitkeep

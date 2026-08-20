@@ -36,6 +36,36 @@ python scripts/evaluate_exposure_gap.py data=kuairand_pure
 pytest
 ```
 
+## Reuse completed artifacts
+
+The cache contains only derived artifacts (split manifests, leakage-safe
+features, fitted models, predictions, metrics, and reports), never raw data.
+Run the cached sequential pipeline after installing the package:
+
+```bash
+python scripts/run_cached_baselines.py
+```
+
+It verifies the official CSV file names/sizes and hashes the relevant
+implementation/configuration before accepting a cache hit. To create a compact
+archive suitable for a Kaggle Dataset or notebook output:
+
+```bash
+python scripts/publish_kaggle_artifacts.py --no-upload
+```
+
+The archive is written to `artifacts/kaggle/ranklab_artifacts.tar.gz` (ignored
+by Git). It can be restored in another checkout with:
+
+```bash
+python scripts/restore_kaggle_artifacts.py artifacts/kaggle/ranklab_artifacts.tar.gz
+```
+
+The Kaggle notebook automatically restores an attached archive and then calls
+the cached runner. It always packages fresh derived outputs at the end. Set
+`PUBLISH_CACHE=True` in its last cell only when Kaggle API credentials are
+available; the default is private when initially creating the dataset locally.
+
 `train_bpr.py` defaults to `device: mps` in
 `configs/retrieval/bpr_mf.yaml`, so on an Apple-silicon Mac its factor
 training runs on the Metal GPU. It fails clearly if MPS is unavailable; set
