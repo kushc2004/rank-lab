@@ -89,6 +89,8 @@ per-context predictions remain in `outputs/metrics/` and
 the attached official dataset, or downloads and checksum-verifies it from the
 official source if that input is absent. It restores any attached derived-artifact
 cache, runs only missing stages, and writes a fresh cache archive to notebook outputs.
+It requests a Tesla T4: Kaggle's current PyTorch wheel supports the T4's `sm_75`
+architecture but not the P100's legacy `sm_60` architecture.
 The launch files are `notebooks/kernel-metadata.json` and
 `notebooks/kaggle.yml`.
 

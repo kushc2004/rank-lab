@@ -4,7 +4,7 @@
 kernel:
   metadata: kernel-metadata.json
   notebook: notebooks/kaggle_full_pipeline.ipynb
-  accelerator: gpu
+  accelerator: NvidiaTeslaT4
 inputs:
   raw_data:
     dataset: kushchaudhari/kuairand-pure-official
