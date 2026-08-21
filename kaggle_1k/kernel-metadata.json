@@ -1,0 +1,16 @@
+{
+  "id": "kushchaudhari/ranklab-kuairand-1k-scale",
+  "title": "RankLab KuaiRand-1K Real Catalog Scale Benchmark",
+  "code_file": "kuairand_1k_scale.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaP100",
+  "dataset_sources": ["annanet/kuairand-1000"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
