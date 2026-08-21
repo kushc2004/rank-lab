@@ -71,9 +71,20 @@ class FullPipeline:
             existing = json.loads(self.state_path.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
             existing = {}
-        if existing.get("fingerprint") != fingerprint or self.force:
+        previous = existing.get("fingerprint", {})
+        inputs_match = (
+            isinstance(previous, dict)
+            and previous.get("raw_files") == fingerprint["raw_files"]
+            and previous.get("config") == fingerprint["config"]
+        )
+        if self.force or (existing.get("fingerprint") != fingerprint and not inputs_match):
             existing = {"pipeline_version": PIPELINE_VERSION, "fingerprint": fingerprint, "stages": {}}
         else:
+            # A code-only update must not discard durable upstream artifacts.
+            # Artifact existence is still checked before every cache hit; a
+            # failed stage is retried while completed predecessors are reused.
+            existing["pipeline_version"] = PIPELINE_VERSION
+            existing["fingerprint"] = fingerprint
             existing.setdefault("stages", {})
         self.state = existing
 
@@ -87,7 +98,10 @@ class FullPipeline:
             "pipeline_version": PIPELINE_VERSION,
             "raw_files": {path.name: {"bytes": path.stat().st_size} for path in paths.values()},
             "implementation_sha256": sha256_files(implementation, self.root),
-            "config": {key: value for key, value in self.config.items() if not key.endswith("_dir")},
+            "config": {
+                key: value for key, value in self.config.items()
+                if not key.endswith("_dir") and key not in {"calibration_max_contexts"}
+            },
         }
 
     def _data(self) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
@@ -945,32 +959,44 @@ class FullPipeline:
         )
 
         frontier_report: dict[str, dict] = {}
-        for split_label in ("standard", "randomized"):
+        frontier_scope: dict[str, dict[str, int]] = {}
+        maximum_contexts = int(self.config.get("calibration_max_contexts", 5_000))
+        if maximum_contexts < 1:
+            raise ValueError("calibration_max_contexts must be positive")
+        for split_index, split_label in enumerate(("standard", "randomized")):
             natural = pd.read_parquet(
                 self.root / f"outputs/predictions/lambdarank_natural_{split_label}.parquet"
             ).merge(
                 item_categories[["item_id", "category"]], on="item_id", how="left",
                 validate="many_to_one",
             )
-            frontier = rerank_frontier(
-                natural, profiles, tuple(float(value) for value in self.config["relevance_weights"]),
-                int(self.config["final_k"]),
-                progress=lambda message, split=split_label: print(
-                    f"[analysis] {split}: {message}", flush=True
-                ),
-            )
-            frontier_path = self._write_frame(
-                frontier, f"outputs/predictions/calibration_frontier_{split_label}.parquet"
-            )
-            artifacts.append(str(frontier_path.relative_to(self.root)))
+            all_contexts = natural["context_id"].drop_duplicates()
+            if len(all_contexts) > maximum_contexts:
+                selected_contexts = set(all_contexts.sample(
+                    n=maximum_contexts, random_state=int(self.config["seed"]) + 701 + split_index
+                ))
+                natural = natural.loc[natural["context_id"].isin(selected_contexts)].copy()
+            frontier_scope[split_label] = {
+                "available_contexts": int(len(all_contexts)),
+                "evaluated_contexts": int(natural["context_id"].nunique()),
+                "maximum_contexts": maximum_contexts,
+            }
             frontier_report[split_label] = {}
-            for weight, frame in frontier.groupby("relevance_weight", sort=True):
-                reranked = frame.copy()
+            # Process one frontier point at a time.  Holding every weight's
+            # full candidate frame simultaneously exhausted Kaggle memory on
+            # the 346k-context randomized log and resulted in SIGKILL.
+            for weight in tuple(float(value) for value in self.config["relevance_weights"]):
+                reranked = rerank_frontier(
+                    natural, profiles, (weight,), int(self.config["final_k"]),
+                    progress=lambda message, split=split_label: print(
+                        f"[analysis] {split}: {message}", flush=True
+                    ),
+                )
                 reranked["score"] = -reranked["rerank_position"].astype(float)
                 metrics, _ = evaluate_ranked_impressions(
                     reranked, tuple(self.config["k_values"]), int(self.config["min_group_size"])
                 )
-                frontier_report[split_label][str(float(weight))] = {
+                frontier_report[split_label][str(weight)] = {
                     "ranking": metrics,
                     "calibration": calibration_report(
                         reranked, profiles, int(self.config["final_k"])
@@ -980,12 +1006,26 @@ class FullPipeline:
                         reranked, len(items), int(self.config["final_k"])
                     ),
                 }
+                # Persist a compact, inspectable top-K preview rather than
+                # four full candidate tables. Metrics above were computed on
+                # all sampled candidates, including their full label totals.
+                preview = reranked.loc[
+                    reranked["rerank_position"].le(max(self.config["k_values"]))
+                ].copy()
+                weight_label = str(weight).replace(".", "_")
+                preview_path = self._write_frame(
+                    preview,
+                    f"outputs/predictions/calibration_frontier_{split_label}_{weight_label}.parquet",
+                )
+                artifacts.append(str(preview_path.relative_to(self.root)))
+                del preview, reranked
 
         analysis = {
             "models": report,
             "paired_model_comparisons": paired,
             "model_ranking_stability": stability,
             "calibration_diversity_frontier": frontier_report,
+            "calibration_frontier_scope": frontier_scope,
         }
         self._write_json(analysis, "outputs/metrics/robustness_and_calibration.json")
         lines = [

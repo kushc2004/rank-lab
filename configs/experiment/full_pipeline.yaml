@@ -1,5 +1,6 @@
 seed: 42
 bootstrap_samples: 500
+calibration_max_contexts: 5000
 popularity_weight_offset: 1.0
 optional_ope: false
 optional_scale: true
