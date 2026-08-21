@@ -52,7 +52,7 @@ from ranklab.retrieval.two_tower import TwoTowerArtifacts, fit_two_tower
 from ranklab.utils.artifacts import atomic_json, environment_snapshot, git_commit, sha256_files
 
 
-PIPELINE_VERSION = 7
+PIPELINE_VERSION = 8
 
 
 @dataclass
@@ -936,9 +936,16 @@ class FullPipeline:
         report: dict[str, dict] = {}
         artifacts: list[str] = []
         per_group_cache: dict[tuple[str, str], pd.DataFrame] = {}
-        for name in model_names:
+        total_diagnostics = len(model_names) * 2
+        print(f"[analysis] diagnostics: 0/{total_diagnostics} model-domain reports", flush=True)
+        for model_index, name in enumerate(model_names, start=1):
             report[name] = {}
-            for split_label in ("standard", "randomized"):
+            for split_index, split_label in enumerate(("standard", "randomized"), start=1):
+                completed = (model_index - 1) * 2 + split_index - 1
+                print(
+                    f"[analysis] diagnostics: {completed}/{total_diagnostics} "
+                    f"({name}, {split_label})", flush=True,
+                )
                 predictions = pd.read_parquet(
                     self.root / f"outputs/predictions/{name}_{split_label}.parquet"
                 ).merge(
@@ -973,6 +980,7 @@ class FullPipeline:
                 artifacts.extend(
                     [str(user_cohort_path.relative_to(self.root)), str(item_cohort_path.relative_to(self.root))]
                 )
+        print(f"[analysis] diagnostics: {total_diagnostics}/{total_diagnostics} model-domain reports", flush=True)
 
         paired: dict[str, dict] = {}
         comparisons = {
@@ -995,6 +1003,7 @@ class FullPipeline:
                     metric="ndcg", k=int(self.config["final_k"]),
                     samples=int(self.config["bootstrap_samples"]), seed=int(self.config["seed"]),
                 )
+        print("[analysis] paired confidence intervals complete", flush=True)
         stability = model_ranking_stability(
             {name: ranked_metrics[name] for name in model_names},
             f"ndcg@{int(self.config['final_k'])}",

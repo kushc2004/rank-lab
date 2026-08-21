@@ -6,6 +6,31 @@ import pandas as pd
 from ranklab.evaluation.ranking_metrics import evaluate_ranked_impressions
 
 
+def _bootstrap_means(values: np.ndarray, samples: int, seed: int) -> np.ndarray:
+    """Compute bootstrap means in vectorized, bounded-memory batches.
+
+    The previous implementation made one Python/NumPy call per replicate.  On
+    the full KuaiRand evaluation this dominated the analysis wall-clock time.
+    Batching keeps the identical user-level resampling protocol, seed, and
+    number of replicates while bounding the temporary draw matrix.
+    """
+    array = np.asarray(values, dtype=float)
+    if samples < 1:
+        return np.empty(0, dtype=float)
+    rng = np.random.default_rng(seed)
+    # At most roughly 16 MiB of float64 sampled values per batch.  The index
+    # matrix used internally by NumPy may add memory, so keep this conservative.
+    batch_size = max(1, min(samples, 2_000_000 // max(len(array), 1)))
+    means: list[np.ndarray] = []
+    remaining = samples
+    while remaining:
+        current = min(batch_size, remaining)
+        draws = rng.choice(array, size=(current, len(array)), replace=True)
+        means.append(draws.mean(axis=1))
+        remaining -= current
+    return np.concatenate(means)
+
+
 def gini(values: np.ndarray) -> float:
     values = np.asarray(values, dtype=float)
     if not len(values) or np.allclose(values.sum(), 0):
@@ -37,9 +62,8 @@ def bootstrap_user_metric(
     values = per_group.loc[per_group["k"].eq(k)].groupby("user_id")[metric].mean()
     if values.empty:
         return {"mean": float("nan"), "ci_low": float("nan"), "ci_high": float("nan"), "n_users": 0}
-    rng = np.random.default_rng(seed)
     array = values.to_numpy()
-    boot = np.asarray([rng.choice(array, len(array), replace=True).mean() for _ in range(samples)])
+    boot = _bootstrap_means(array, samples, seed)
     return {
         "mean": float(array.mean()), "ci_low": float(np.percentile(boot, 2.5)),
         "ci_high": float(np.percentile(boot, 97.5)), "n_users": int(len(array)),
@@ -61,11 +85,7 @@ def paired_user_bootstrap(
     if paired.empty:
         return {"mean_difference": float("nan"), "ci_low": float("nan"), "ci_high": float("nan"), "n_users": 0}
     differences = (paired["left"] - paired["right"]).to_numpy()
-    rng = np.random.default_rng(seed)
-    boot = np.asarray([
-        rng.choice(differences, len(differences), replace=True).mean()
-        for _ in range(samples)
-    ])
+    boot = _bootstrap_means(differences, samples, seed)
     return {
         "mean_difference": float(differences.mean()),
         "ci_low": float(np.percentile(boot, 2.5)),
@@ -146,26 +166,31 @@ def diversity_report(predictions: pd.DataFrame, k: int = 10) -> dict[str, float 
     top = predictions.sort_values(
         ["context_id", "score"], ascending=[True, False], kind="stable"
     ).groupby("context_id", sort=False).head(k)
-    diversities: list[float] = []
-    unique_categories: list[int] = []
-    entropies: list[float] = []
-    for _, frame in top.groupby("context_id", sort=False):
-        categories = frame["category"].fillna("unknown").astype(str).to_numpy()
-        n = len(categories)
-        if n > 1:
-            pairs = n * (n - 1) / 2
-            same = sum(count * (count - 1) / 2 for count in pd.Series(categories).value_counts())
-            diversities.append(float(1 - same / pairs))
-        else:
-            diversities.append(0.0)
-        counts = pd.Series(categories).value_counts(normalize=True).to_numpy()
-        entropy = float(-np.sum(counts * np.log(np.maximum(counts, 1e-12))))
-        entropies.append(entropy / np.log(n) if n > 1 else 0.0)
-        unique_categories.append(int(pd.Series(categories).nunique()))
+    if top.empty:
+        return {
+            "intra_list_category_diversity": float("nan"),
+            "normalized_category_entropy": float("nan"),
+            "mean_unique_categories": float("nan"),
+            "contexts": 0,
+            "k": int(k),
+        }
+    work = top[["context_id", "category"]].copy()
+    work["category"] = work["category"].fillna("unknown").astype(str)
+    counts = work.groupby(["context_id", "category"], sort=False).size().rename("count")
+    group_counts = counts.groupby(level="context_id", sort=False)
+    sizes = group_counts.sum().astype(float)
+    same_pairs = (counts * (counts - 1) / 2).groupby(level="context_id", sort=False).sum()
+    total_pairs = sizes * (sizes - 1) / 2
+    diversity = (1 - same_pairs / total_pairs).where(sizes.gt(1), 0.0)
+    probabilities = counts / group_counts.transform("sum")
+    entropy_terms = -(probabilities * np.log(np.maximum(probabilities, 1e-12)))
+    entropy = entropy_terms.groupby(level="context_id", sort=False).sum()
+    normalized_entropy = (entropy / np.log(sizes)).where(sizes.gt(1), 0.0)
+    unique_categories = group_counts.size()
     return {
-        "intra_list_category_diversity": float(np.mean(diversities)) if diversities else float("nan"),
-        "normalized_category_entropy": float(np.mean(entropies)) if entropies else float("nan"),
-        "mean_unique_categories": float(np.mean(unique_categories)) if unique_categories else float("nan"),
+        "intra_list_category_diversity": float(diversity.mean()),
+        "normalized_category_entropy": float(normalized_entropy.mean()),
+        "mean_unique_categories": float(unique_categories.mean()),
         "contexts": int(len(unique_categories)),
         "k": int(k),
     }

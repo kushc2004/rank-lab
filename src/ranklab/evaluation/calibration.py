@@ -47,15 +47,57 @@ def calibration_report(
     k: int = 10,
 ) -> dict[str, float]:
     top = recommendations.sort_values(["context_id", "score"], ascending=[True, False], kind="stable").groupby("context_id", sort=False).head(k)
-    divergences: list[float] = []
-    for (_, user_id), frame in top.groupby(["context_id", "user_id"], sort=False):
-        preference = profiles.get(int(user_id), {})
-        rec = frame["category"].fillna("unknown").value_counts(normalize=True).to_dict()
-        categories = sorted(set(preference) | set(rec))
-        if categories and preference:
-            divergences.append(jensen_shannon([preference.get(c, 0) for c in categories], [rec.get(c, 0) for c in categories]))
+    if top.empty or not profiles:
+        return {"js_divergence_mean": float("nan"), "contexts": 0, "k": int(k)}
+
+    # Expand fixed user profiles once, then join them to recommendation
+    # category probabilities.  This replaces a Python loop over every ranking
+    # context while retaining the original union-of-categories JS definition.
+    profile_rows = [
+        {"user_id": int(user_id), "category": str(category), "preference": float(value)}
+        for user_id, preferences in profiles.items()
+        for category, value in preferences.items()
+    ]
+    if not profile_rows:
+        return {"js_divergence_mean": float("nan"), "contexts": 0, "k": int(k)}
+    profile_frame = pd.DataFrame(profile_rows)
+    work = top[["context_id", "user_id", "category"]].copy()
+    work["category"] = work["category"].fillna("unknown").astype(str)
+    context_users = work[["context_id", "user_id"]].drop_duplicates()
+    profile_contexts = context_users.merge(profile_frame, on="user_id", how="inner", validate="many_to_many")
+    if profile_contexts.empty:
+        return {"js_divergence_mean": float("nan"), "contexts": 0, "k": int(k)}
+    eligible = profile_contexts[["context_id", "user_id"]].drop_duplicates()
+    recommendation_counts = (
+        work.merge(eligible, on=["context_id", "user_id"], how="inner", validate="many_to_one")
+        .groupby(["context_id", "user_id", "category"], sort=False)
+        .size()
+        .rename("recommendation_count")
+        .reset_index()
+    )
+    recommendation_counts["recommendation"] = recommendation_counts["recommendation_count"] / recommendation_counts.groupby(
+        ["context_id", "user_id"], sort=False
+    )["recommendation_count"].transform("sum")
+    union = profile_contexts.merge(
+        recommendation_counts[["context_id", "user_id", "category", "recommendation"]],
+        on=["context_id", "user_id", "category"], how="outer", validate="one_to_one",
+    )
+    union["preference"] = union["preference"].fillna(0.0)
+    union["recommendation"] = union["recommendation"].fillna(0.0)
+    group_columns = ["context_id", "user_id"]
+    epsilon = 1e-12
+    union["_left"] = union["preference"] + epsilon
+    union["_right"] = union["recommendation"] + epsilon
+    union["_left"] /= union.groupby(group_columns, sort=False)["_left"].transform("sum")
+    union["_right"] /= union.groupby(group_columns, sort=False)["_right"].transform("sum")
+    middle = (union["_left"] + union["_right"]) / 2
+    union["_js_term"] = (
+        union["_left"] * np.log(union["_left"] / middle)
+        + union["_right"] * np.log(union["_right"] / middle)
+    ) / 2
+    divergences = union.groupby(group_columns, sort=False)["_js_term"].sum()
     return {
-        "js_divergence_mean": float(np.mean(divergences)) if divergences else float("nan"),
-        "contexts": len(divergences),
+        "js_divergence_mean": float(divergences.mean()) if not divergences.empty else float("nan"),
+        "contexts": int(len(divergences)),
         "k": int(k),
     }
