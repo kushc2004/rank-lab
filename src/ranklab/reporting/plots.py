@@ -40,7 +40,7 @@ def _standard_random_exposure(interactions: pd.DataFrame, path: Path) -> str:
     counts = (
         interactions.assign(
             evaluation_policy=np.where(
-                interactions["policy"].eq("random"), "randomized", "standard"
+                interactions["is_random"].eq(1), "randomized", "standard"
             )
         )
         .groupby(["evaluation_policy", "item_id"], observed=True)
@@ -67,7 +67,7 @@ def _standard_random_rewards(interactions: pd.DataFrame, path: Path) -> str:
         return _placeholder(path, "Standard vs randomized reward rates", "No reward columns are available.")
     work = interactions.copy()
     work["evaluation_policy"] = np.where(
-        work["policy"].eq("random"), "randomized", "standard"
+        work["is_random"].eq(1), "randomized", "standard"
     )
     values = work.groupby("evaluation_policy", observed=True)[reward_columns].mean().T
     figure, axis = plt.subplots(figsize=(8, 5))
