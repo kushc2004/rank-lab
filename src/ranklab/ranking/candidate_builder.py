@@ -31,6 +31,7 @@ def retrieve_candidates(
     model: TwoTowerArtifacts,
     top_k: int = 200,
     index: ExactInnerProductIndex | None = None,
+    popularity_weight: float | None = None,
 ) -> pd.DataFrame:
     """Retrieve catalog candidates for unique contexts under an explicit contract."""
     required = {"context_id", "user_id", "timestamp_ms"}
@@ -44,13 +45,30 @@ def retrieve_candidates(
     known = unique["user_id"].map(user_map).notna()
     unique = unique.loc[known].copy()
     positions = unique["user_id"].map(user_map).astype(int).to_numpy()
+    weight = float((model.metadata or {}).get("popularity_weight", 0.0)) if popularity_weight is None else float(popularity_weight)
+    if weight and model.item_popularity is None:
+        raise ValueError("popularity-weighted retrieval requires train-only item popularity")
     if index is None:
         index = ExactInnerProductIndex.build(model.item_ids, model.item_embeddings)
     elif not np.array_equal(index.item_ids, model.item_ids):
         raise ValueError("candidate index item IDs do not match the retriever artifact")
     elif index.embeddings.shape[1] != model.item_embeddings.shape[1]:
         raise ValueError("candidate index dimension does not match the retriever artifact")
-    item_ids, scores = index.search(model.user_embeddings[positions], top_k)
+    if weight:
+        # Exact score fusion is intentionally used for Pure's small catalog.
+        # It keeps the hybrid comparable with the exact dense-retrieval path;
+        # no approximate-index behavior is hidden in model selection.
+        all_scores = model.user_embeddings[positions] @ model.item_embeddings.T
+        all_scores = all_scores + weight * model.item_popularity[None, :]
+        width = min(top_k, len(model.item_ids))
+        top = np.argpartition(-all_scores, width - 1, axis=1)[:, :width]
+        top_scores = np.take_along_axis(all_scores, top, axis=1)
+        order = np.argsort(-top_scores, axis=1, kind="stable")
+        positions_in_catalog = np.take_along_axis(top, order, axis=1)
+        item_ids = model.item_ids[positions_in_catalog]
+        scores = np.take_along_axis(all_scores, positions_in_catalog, axis=1)
+    else:
+        item_ids, scores = index.search(model.user_embeddings[positions], top_k)
     width = item_ids.shape[1]
     result = pd.DataFrame(
         {

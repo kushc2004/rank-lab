@@ -52,7 +52,7 @@ from ranklab.retrieval.two_tower import TwoTowerArtifacts, fit_two_tower
 from ranklab.utils.artifacts import atomic_json, environment_snapshot, git_commit, sha256_files
 
 
-PIPELINE_VERSION = 8
+PIPELINE_VERSION = 9
 
 
 @dataclass
@@ -332,26 +332,32 @@ class FullPipeline:
         selection_rows: list[dict[str, object]] = []
         for strategy in strategies:
             for hard_refresh in hard_refresh_options:
-                name = f"{strategy}__hard_{str(bool(hard_refresh)).lower()}"
-                print(f"[two-tower] validation variant {name}", flush=True)
+                training_name = f"{strategy}__hard_{str(bool(hard_refresh)).lower()}"
+                print(f"[two-tower] validation training variant {training_name}", flush=True)
                 variant = self._fit_retriever(
                     train, sides, negative_strategy=str(strategy),
                     hard_negative_refresh=bool(hard_refresh),
                 )
-                variants[name] = variant
-                candidates = retrieve_candidates(
-                    validation_contexts, variant, int(self.config["candidate_k"])
-                )
-                catalog_metrics = retrieval_metrics(
-                    candidates, validation_contexts,
-                    tuple(int(value) for value in self.config["retrieval_k_values"]),
-                )
-                selection_rows.append({
-                    "variant": name,
-                    "negative_strategy": str(strategy),
-                    "hard_negative_refresh": bool(hard_refresh),
-                    **catalog_metrics,
-                })
+                variants[training_name] = variant
+                for popularity_weight in self.config.get("retrieval_popularity_weights", [0.0]):
+                    weight = float(popularity_weight)
+                    name = f"{training_name}__popularity_{weight:g}"
+                    candidates = retrieve_candidates(
+                        validation_contexts, variant, int(self.config["candidate_k"]),
+                        popularity_weight=weight,
+                    )
+                    catalog_metrics = retrieval_metrics(
+                        candidates, validation_contexts,
+                        tuple(int(value) for value in self.config["retrieval_k_values"]),
+                    )
+                    selection_rows.append({
+                        "variant": name,
+                        "training_variant": training_name,
+                        "negative_strategy": str(strategy),
+                        "hard_negative_refresh": bool(hard_refresh),
+                        "popularity_weight": weight,
+                        **catalog_metrics,
+                    })
         selection_metric = str(self.config["retrieval_selection_metric"])
         tiebreaker = str(self.config["retrieval_selection_tiebreaker"])
         selection = pd.DataFrame(selection_rows)
@@ -362,7 +368,9 @@ class FullPipeline:
             ascending=[False, False, True], kind="stable",
         ).iloc[0]
         selected_name = str(selected["variant"])
-        model = variants[selected_name]
+        model = variants[str(selected["training_variant"])]
+        selected_weight = float(selected["popularity_weight"])
+        model.metadata = {**(model.metadata or {}), "popularity_weight": selected_weight}
         selection_report = {
             "selection_split": "standard_validation",
             "selection_metric": selection_metric,
@@ -370,6 +378,11 @@ class FullPipeline:
             "selected_variant": selected_name,
             "selected_negative_strategy": str(selected["negative_strategy"]),
             "selected_hard_negative_refresh": bool(selected["hard_negative_refresh"]),
+            "selected_popularity_weight": selected_weight,
+            "retrieval_hybrid_contract": (
+                "exact dense score plus train-only normalized log long-view popularity; "
+                "weight selected on standard validation only"
+            ),
             "final_standard_test_was_used_for_selection": False,
             "final_randomized_test_was_used_for_selection": False,
             "variants": selection_rows,
@@ -385,6 +398,7 @@ class FullPipeline:
             negative_strategy=str(selected["negative_strategy"]),
             hard_negative_refresh=bool(selected["hard_negative_refresh"]),
         )
+        source_model.metadata = {**(source_model.metadata or {}), "popularity_weight": selected_weight}
         source_dir = self.root / "outputs/models/two_tower_ranker_source"
         source_model.save(source_dir)
         source_index = ExactInnerProductIndex.build(

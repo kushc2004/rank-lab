@@ -19,6 +19,9 @@ run_relevance_ablation: true
 run_retrieval_ablations: true
 retrieval_ablation_strategies: [random, exposed_mixed]
 retrieval_ablation_hard_refresh: [false, true]
+# These are exact-score retrieval hybrids, selected only on the standard
+# validation period. Zero retains the pure Two-Tower retriever.
+retrieval_popularity_weights: [0.0, 0.1, 0.25, 0.5]
 retrieval_k_values: [50, 100, 200]
 retrieval_selection_metric: recall@200
 retrieval_selection_tiebreaker: ndcg@200

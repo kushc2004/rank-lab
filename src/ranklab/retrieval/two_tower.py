@@ -37,15 +37,24 @@ class TwoTowerArtifacts:
     item_embeddings: np.ndarray
     device: str
     metadata: dict | None = None
+    item_popularity: np.ndarray | None = None
 
-    def score(self, users: pd.Series, items: pd.Series) -> np.ndarray:
+    def score(
+        self,
+        users: pd.Series,
+        items: pd.Series,
+        popularity_weight: float | None = None,
+    ) -> np.ndarray:
         user_map = {int(value): index for index, value in enumerate(self.user_ids)}
         item_map = {int(value): index for index, value in enumerate(self.item_ids)}
         scores = np.zeros(len(users), dtype=np.float32)
+        weight = float((self.metadata or {}).get("popularity_weight", 0.0)) if popularity_weight is None else float(popularity_weight)
         for position, (user, item) in enumerate(zip(users, items)):
             u, i = user_map.get(int(user)), item_map.get(int(item))
             if u is not None and i is not None:
                 scores[position] = self.user_embeddings[u] @ self.item_embeddings[i]
+                if weight and self.item_popularity is not None:
+                    scores[position] += weight * self.item_popularity[i]
         return scores
 
     predict = score
@@ -57,6 +66,8 @@ class TwoTowerArtifacts:
         np.save(directory / "item_ids.npy", self.item_ids)
         np.save(directory / "user_eval_embeddings.npy", self.user_embeddings)
         np.save(directory / "item_embeddings.npy", self.item_embeddings)
+        if self.item_popularity is not None:
+            np.save(directory / "item_popularity.npy", self.item_popularity)
         (directory / "training_metadata.json").write_text(
             json.dumps(self.metadata or {}, indent=2, sort_keys=True) + "\n"
         )
@@ -73,6 +84,10 @@ class TwoTowerArtifacts:
             np.load(directory / "item_embeddings.npy"),
             str(metadata.get("device", "loaded")),
             metadata,
+            (
+                np.load(directory / "item_popularity.npy")
+                if (directory / "item_popularity.npy").is_file() else None
+            ),
         )
 
 
@@ -219,6 +234,21 @@ def fit_two_tower(
     item_ids = np.sort(train["item_id"].unique().astype(np.int64))
     user_map = {int(value): index for index, value in enumerate(user_ids)}
     item_map = {int(value): index for index, value in enumerate(item_ids)}
+    # A train-only log-popularity prior is deliberately exported with the
+    # embedding model.  It can be validation-selected as a *retrieval hybrid*
+    # without forcing positives into the catalog or learning from later dates.
+    # It is not an item side feature and does not change the pure Two-Tower
+    # embedding objective.
+    popularity_counts = (
+        train.loc[train["long_view"].eq(1), "item_id"]
+        .value_counts()
+        .reindex(item_ids, fill_value=0)
+        .to_numpy(dtype=np.float32)
+    )
+    item_popularity = np.log1p(popularity_counts)
+    maximum_popularity = float(item_popularity.max())
+    if maximum_popularity > 0:
+        item_popularity /= maximum_popularity
     pairs = np.asarray(
         [
             (user_map[int(row.user_id)], item_map[int(row.item_id)])
@@ -446,4 +476,7 @@ def fit_two_tower(
         "positive_pairs": int(len(pairs)),
         "side_features": bool(use_side_features),
     }
-    return TwoTowerArtifacts(user_ids, item_ids, all_users, all_items, str(torch_device), metadata)
+    return TwoTowerArtifacts(
+        user_ids, item_ids, all_users, all_items, str(torch_device), metadata,
+        item_popularity,
+    )
