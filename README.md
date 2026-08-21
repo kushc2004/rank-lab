@@ -89,8 +89,7 @@ per-context predictions remain in `outputs/metrics/` and
 the attached official dataset, or downloads and checksum-verifies it from the
 official source if that input is absent. It restores any attached derived-artifact
 cache, runs only missing stages, and writes a fresh cache archive to notebook outputs.
-The launch files are `notebooks/kernel-metadata.json` and
-`notebooks/kaggle.yml`.
+The launch files are `kernel-metadata.json` and `kaggle.yml`.
 
 ```bash
 kaggle kernels push -p .

@@ -87,7 +87,10 @@ def _queries(
         video_ids = pd.to_numeric(positive["video_id"], errors="raise").to_numpy(dtype=np.int64)
         positions = np.searchsorted(sorted_ids, video_ids)
         valid = positions < len(sorted_ids)
-        valid[valid] &= sorted_ids[positions[valid]] == video_ids[valid]
+        candidate_rows = np.flatnonzero(valid)
+        valid[candidate_rows] = (
+            sorted_ids[positions[candidate_rows]] == video_ids[candidate_rows]
+        )
         for user_id, position in zip(
             pd.to_numeric(positive.loc[valid, "user_id"], errors="raise").to_numpy(dtype=np.int64),
             order[positions[valid]],
