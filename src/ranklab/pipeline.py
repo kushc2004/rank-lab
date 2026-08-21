@@ -38,6 +38,7 @@ from ranklab.evaluation.prediction_calibration import (
 from ranklab.evaluation.ranking_metrics import evaluate_ranked_impressions
 from ranklab.ranking.candidate_builder import (
     attach_labels,
+    candidate_set_diagnostics,
     observed_ranking_rows,
     retrieval_metrics,
     retrieve_candidates,
@@ -51,7 +52,7 @@ from ranklab.retrieval.two_tower import TwoTowerArtifacts, fit_two_tower
 from ranklab.utils.artifacts import atomic_json, environment_snapshot, git_commit, sha256_files
 
 
-PIPELINE_VERSION = 6
+PIPELINE_VERSION = 7
 
 
 @dataclass
@@ -77,8 +78,22 @@ class FullPipeline:
             and previous.get("raw_files") == fingerprint["raw_files"]
             and previous.get("config") == fingerprint["config"]
         )
+        previous_version = existing.get("pipeline_version")
         if self.force or (existing.get("fingerprint") != fingerprint and not inputs_match):
             existing = {"pipeline_version": PIPELINE_VERSION, "fingerprint": fingerprint, "stages": {}}
+        elif previous_version != PIPELINE_VERSION:
+            # Pipeline versions are explicit artifact-schema/semantics
+            # boundaries.  Retain the independently produced baselines, but
+            # rerun the retriever and every dependent stage whenever a new
+            # version changes their contract.  This prevents a code-only
+            # retrieval fix from being hidden by a stale Kaggle checkpoint.
+            stages = existing.get("stages", {})
+            existing["pipeline_version"] = PIPELINE_VERSION
+            existing["fingerprint"] = fingerprint
+            existing["stages"] = {
+                name: record for name, record in stages.items()
+                if name == "baselines"
+            }
         else:
             # A code-only update must not discard durable upstream artifacts.
             # Artifact existence is still checked before every cache hit; a
@@ -300,11 +315,76 @@ class FullPipeline:
         train = interactions.loc[interactions["split"].eq("train")].copy()
         source_train, ranker_train, cutoff = self._ranker_temporal_slices(train)
 
+        # Select the retrieval objective exclusively on the standard validation
+        # period.  The standard and randomized test periods must remain unseen
+        # during this choice; their metrics are final evaluation only.
+        validation_rows = interactions.loc[interactions["split"].eq("validation")]
+        validation_contexts = self._sample_context_rows(
+            validation_rows, int(self.config["max_validation_contexts"]), 401
+        )
+        if bool(self.config.get("run_retrieval_ablations", False)):
+            strategies = self.config["retrieval_ablation_strategies"]
+            hard_refresh_options = self.config["retrieval_ablation_hard_refresh"]
+        else:
+            strategies = [self.config["negative_strategy"]]
+            hard_refresh_options = [self.config["hard_negative_refresh"]]
+        variants: dict[str, TwoTowerArtifacts] = {}
+        selection_rows: list[dict[str, object]] = []
+        for strategy in strategies:
+            for hard_refresh in hard_refresh_options:
+                name = f"{strategy}__hard_{str(bool(hard_refresh)).lower()}"
+                print(f"[two-tower] validation variant {name}", flush=True)
+                variant = self._fit_retriever(
+                    train, sides, negative_strategy=str(strategy),
+                    hard_negative_refresh=bool(hard_refresh),
+                )
+                variants[name] = variant
+                candidates = retrieve_candidates(
+                    validation_contexts, variant, int(self.config["candidate_k"])
+                )
+                catalog_metrics = retrieval_metrics(
+                    candidates, validation_contexts,
+                    tuple(int(value) for value in self.config["retrieval_k_values"]),
+                )
+                selection_rows.append({
+                    "variant": name,
+                    "negative_strategy": str(strategy),
+                    "hard_negative_refresh": bool(hard_refresh),
+                    **catalog_metrics,
+                })
+        selection_metric = str(self.config["retrieval_selection_metric"])
+        tiebreaker = str(self.config["retrieval_selection_tiebreaker"])
+        selection = pd.DataFrame(selection_rows)
+        if selection.empty or selection_metric not in selection or tiebreaker not in selection:
+            raise ValueError("retrieval selection metrics were not produced")
+        selected = selection.sort_values(
+            [selection_metric, tiebreaker, "variant"],
+            ascending=[False, False, True], kind="stable",
+        ).iloc[0]
+        selected_name = str(selected["variant"])
+        model = variants[selected_name]
+        selection_report = {
+            "selection_split": "standard_validation",
+            "selection_metric": selection_metric,
+            "selection_tiebreaker": tiebreaker,
+            "selected_variant": selected_name,
+            "selected_negative_strategy": str(selected["negative_strategy"]),
+            "selected_hard_negative_refresh": bool(selected["hard_negative_refresh"]),
+            "final_standard_test_was_used_for_selection": False,
+            "final_randomized_test_was_used_for_selection": False,
+            "variants": selection_rows,
+        }
+        self._write_json(selection_report, "outputs/metrics/retrieval_selection.json")
+
         # Ranker-training candidates must come from a retriever that has not
         # learned the held-out ranker labels. The final retriever is trained on
         # all standard training rows and is used only after that boundary.
         print("[two-tower] fitting ranker-source retriever", flush=True)
-        source_model = self._fit_retriever(source_train, sides)
+        source_model = self._fit_retriever(
+            source_train, sides,
+            negative_strategy=str(selected["negative_strategy"]),
+            hard_negative_refresh=bool(selected["hard_negative_refresh"]),
+        )
         source_dir = self.root / "outputs/models/two_tower_ranker_source"
         source_model.save(source_dir)
         source_index = ExactInnerProductIndex.build(
@@ -312,8 +392,7 @@ class FullPipeline:
         )
         source_index_dir = self.root / "data/indices/two_tower_ranker_source_exact"
         source_index.save(source_index_dir)
-        print("[two-tower] fitting final retriever", flush=True)
-        model = self._fit_retriever(train, sides)
+        print(f"[two-tower] selected final retriever: {selected_name}", flush=True)
         model_dir = self.root / "outputs/models/two_tower"
         model.save(model_dir)
         index = ExactInnerProductIndex.build(model.item_ids, model.item_embeddings)
@@ -347,62 +426,18 @@ class FullPipeline:
                 str(per_group_path.relative_to(self.root)),
             ])
         self._write_json(metrics, "outputs/metrics/two_tower.json")
-        if bool(self.config.get("run_retrieval_ablations", False)):
-            ablations: dict[str, dict] = {}
-            for strategy in self.config["retrieval_ablation_strategies"]:
-                for hard_refresh in self.config["retrieval_ablation_hard_refresh"]:
-                    name = f"{strategy}__hard_{str(bool(hard_refresh)).lower()}"
-                    if (
-                        strategy == self.config["negative_strategy"]
-                        and bool(hard_refresh) == bool(self.config["hard_negative_refresh"])
-                    ):
-                        print(f"[two-tower] ablation {name}: reusing final retriever", flush=True)
-                        ablation_model = model
-                    else:
-                        print(f"[two-tower] fitting ablation {name}", flush=True)
-                        ablation_model = self._fit_retriever(
-                            train, sides, negative_strategy=str(strategy),
-                            hard_negative_refresh=bool(hard_refresh),
-                        )
-                        ablation_dir = self.root / f"outputs/models/two_tower_ablation_{name}"
-                        ablation_model.save(ablation_dir)
-                        artifacts.extend(
-                            str(path.relative_to(self.root))
-                            for path in sorted(ablation_dir.glob("*")) if path.is_file()
-                        )
-                    ablations[name] = {}
-                    for label, evaluation_rows in evaluation_splits.items():
-                        sampled = self._sample_context_rows(
-                            evaluation_rows, int(self.config["max_test_contexts"]), 31
-                        )
-                        rows = observed_ranking_rows(
-                            sampled, ablation_model, int(self.config["session_gap_minutes"]),
-                            int(self.config["context_window_size"]),
-                        )
-                        rows["score"] = rows["retrieval_score"]
-                        values, _ = evaluate_ranked_impressions(
-                            rows, tuple(self.config["k_values"]), int(self.config["min_group_size"])
-                        )
-                        catalog_candidates = retrieve_candidates(
-                            sampled, ablation_model, int(self.config["candidate_k"])
-                        )
-                        ablations[name][label] = {
-                            "exposed_ranking": values,
-                            "catalog_retrieval": retrieval_metrics(
-                                catalog_candidates, sampled,
-                                tuple(int(value) for value in self.config["retrieval_k_values"]),
-                            ),
-                        }
-            self._write_json(ablations, "outputs/metrics/retrieval_negative_ablations.json")
-            artifacts.append("outputs/metrics/retrieval_negative_ablations.json")
         index_artifacts = [
             str(path.relative_to(self.root))
             for directory in (source_index_dir, index_dir)
             for path in sorted(directory.glob("*")) if path.is_file()
         ]
         return {
-            "artifacts": artifacts + ["outputs/metrics/two_tower.json", *index_artifacts],
+            "artifacts": artifacts + [
+                "outputs/metrics/two_tower.json", "outputs/metrics/retrieval_selection.json",
+                *index_artifacts,
+            ],
             "device": model.device,
+            "selected_retrieval_variant": selected_name,
             "ranker_source_end_timestamp_ms": cutoff,
             "ranker_source_rows": int(len(source_train)),
             "ranker_training_rows": int(len(ranker_train)),
@@ -420,6 +455,7 @@ class FullPipeline:
         final_index = ExactInnerProductIndex.load(self.root / "data/indices/two_tower_exact")
         outputs = []
         retrieval_report: dict[str, dict] = {}
+        augmentation_report: dict[str, dict] = {}
         training_contracts = (
             (
                 "train", ranker_train, source_model, source_index,
@@ -439,6 +475,7 @@ class FullPipeline:
                 retrieved, exposed, tuple(int(value) for value in self.config["retrieval_k_values"])
             )
             candidates = attach_labels(retrieved, exposed, str(self.config["relevance_mode"]))
+            augmentation_report[split] = candidate_set_diagnostics(candidates)
             featured = build_ranker_features(
                 candidates, train, sides["users"], self._items(sides),
                 point_in_time=split == "train",
@@ -471,6 +508,7 @@ class FullPipeline:
             "validation_and_test_retriever": "two_tower",
             "candidate_index": "persisted_exact_inner_product_with_faiss_when_available",
             "forced_positives_excluded_from_retrieval_metrics": True,
+            "ranker_candidate_augmentation_report": "outputs/metrics/candidate_augmentation.json",
         }
         self._write_json(
             {
@@ -486,7 +524,11 @@ class FullPipeline:
         )
         outputs.append("data/features/feature_manifest.json")
         self._write_json(retrieval_report, "outputs/metrics/retrieval.json")
-        return {"artifacts": outputs + ["outputs/metrics/retrieval.json"]}
+        self._write_json(augmentation_report, "outputs/metrics/candidate_augmentation.json")
+        return {"artifacts": outputs + [
+            "outputs/metrics/retrieval.json",
+            "outputs/metrics/candidate_augmentation.json",
+        ]}
 
     def stage_rankers(self) -> dict:
         train = pd.read_parquet(self.root / "data/processed/ranker/train.parquet")

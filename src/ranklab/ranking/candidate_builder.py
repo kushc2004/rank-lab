@@ -133,6 +133,41 @@ def attach_labels(
     return result
 
 
+def candidate_set_diagnostics(candidates: pd.DataFrame) -> dict[str, float | int | str]:
+    """Describe any label-preserving candidate augmentation for ranker metrics.
+
+    ``attach_labels`` appends positives that the retriever missed so ranker
+    training groups are not silently all-negative.  Those rows are useful for
+    conditional ranker learning, but they must never be read as retrieval
+    wins.  Persisting this summary alongside retrieval metrics makes that
+    distinction visible in every run report.
+    """
+    required = {"context_id", "forced_positive"}
+    if missing := required - set(candidates):
+        raise ValueError(f"candidate diagnostics missing {sorted(missing)}")
+    forced = candidates["forced_positive"].fillna(0).astype(bool)
+    total_contexts = int(candidates["context_id"].nunique())
+    forced_contexts = int(candidates.loc[forced, "context_id"].nunique())
+    result: dict[str, float | int | str] = {
+        "candidate_rows": int(len(candidates)),
+        "candidate_contexts": total_contexts,
+        "forced_positive_rows": int(forced.sum()),
+        "forced_positive_contexts": forced_contexts,
+        "forced_positive_context_rate": float(forced_contexts / max(total_contexts, 1)),
+        "metric_scope": (
+            "Ranker metrics are conditional on this augmented candidate set; "
+            "use outputs/metrics/retrieval.json for unaugmented full-catalog retrieval."
+        ),
+    }
+    if "label" in candidates:
+        positive = candidates["label"].fillna(0).gt(0)
+        result["positive_candidate_rows"] = int(positive.sum())
+        result["forced_positive_share_of_positive_rows"] = float(
+            forced.sum() / max(int(positive.sum()), 1)
+        )
+    return result
+
+
 def retrieval_metrics(
     candidates: pd.DataFrame,
     exposed: pd.DataFrame,

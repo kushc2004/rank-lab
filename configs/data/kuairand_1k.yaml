@@ -1,5 +1,9 @@
 # Optional official KuaiRand-1K extension. No path is assumed by RankLab.
+# Attach the official extraction root (KuaiRand-1K) or its official data/ dir.
 dataset: kuairand_1k
 enabled: false
 raw_dir: null
-dataset_claim: official_extension_must_be_attached_and_audited_separately
+official_archive: KuaiRand-1K.tar.gz
+official_md5: 6b0b9c8222d67fcd4c676218edca3f1f
+official_url: https://zenodo.org/records/10439422/files/KuaiRand-1K.tar.gz
+dataset_claim: official_extension_must_be_attached_checksum_verified_and_audited_separately
