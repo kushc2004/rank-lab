@@ -123,6 +123,37 @@ python -m pip install -e '.[full,ope]'
 python scripts/run_full_pipeline.py optional_ope=true obd_data_path=/path/to/open_bandit_dataset
 ```
 
+`kaggle_ope/` is an isolated, propensity-valid Kaggle launcher which uses the
+OBP adapter's documented source when a local OBD path is not provided. It keeps
+OBD estimates out of the KuaiRand-Pure report.
+
+## Real KuaiRand-1K catalog-scale validation
+
+KuaiRand-1K is deliberately a separate scale experiment. The project-side
+adapter audits the official extracted hierarchy and the isolated Kaggle kernel
+at `kaggle_1k/` attaches the owner-provided `annanet/kuairand-1000` source.
+It performs exact-versus-HNSW index benchmarking on real 1K item metadata and
+standard-log user histories. It reports index recall and latency, not trained
+recommender quality.
+
+```bash
+kaggle kernels push -p kaggle_1k
+python3 scripts/watch_kaggle_kernel.py --slug kushchaudhari/ranklab-kuairand-1k-scale \
+  --output outputs/logs/kaggle_1k_scale.log
+```
+
+## Fresh-environment reproduction
+
+After a completed cache archive is available, create an isolated virtual
+environment and rerun the documented pipeline without redoing compatible
+stages:
+
+```bash
+bash scripts/reproduce_fresh_environment.sh \
+  --raw-dir /path/to/KuaiRand-Pure/data \
+  --cache artifacts/kaggle/ranklab_artifacts.tar.gz
+```
+
 ## Dashboard
 
 After a completed experiment:
